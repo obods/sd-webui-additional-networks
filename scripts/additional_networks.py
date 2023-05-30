@@ -4,6 +4,7 @@ import torch
 
 import modules.scripts as scripts
 from modules import shared, script_callbacks
+from modules.ui_components import ToolButton
 import gradio as gr
 
 import modules.ui
@@ -12,7 +13,6 @@ from scripts import lora_compvis, model_util, metadata_editor, xyz_grid_support
 from scripts.model_util import lora_models, MAX_MODEL_COUNT
 
 
-memo_symbol = '\U0001F4DD' # 📝
 addnet_paste_params = {"txt2img": [], "img2img": []}
 
 
@@ -62,16 +62,6 @@ class Script(scripts.Script):
             model = gr.Dropdown(list(lora_models.keys()),
                                 label=f"Model {i+1}",
                                 value="None")
-            with gr.Row(visible=False):
-              model_path = gr.Textbox(value="None", interactive=False, visible=False)
-            model.change(lambda module, model, i=i: model_util.lora_models.get(model, "None"), inputs=[module, model], outputs=[model_path])
-
-            # Sending from the script UI to the metadata editor has to bypass
-            # gradio since this button will exit the gr.Blocks context by the
-            # time the metadata editor tab is created, so event handlers can't
-            # be registered on it by then.
-            model_info = gr.Button(value=memo_symbol, elem_id=f"additional_networks_send_to_metadata_editor_{i}")
-            model_info.click(fn=None, _js="addnet_send_to_metadata_editor", inputs=[module, model_path], outputs=[])
 
             module.change(lambda module, model, i=i: xyz_grid_support.update_axis_params(i, module, model), inputs=[module, model], outputs=[])
             model.change(lambda module, model, i=i: xyz_grid_support.update_axis_params(i, module, model), inputs=[module, model], outputs=[])
@@ -141,22 +131,19 @@ class Script(scripts.Script):
           f"AddNet Weight B {i+1}": weight_tenc,
       })
 
-  def restore_networks(self, sd_model):
-    unet = sd_model.model.diffusion_model
-    text_encoder = sd_model.cond_stage_model
-
-    if len(self.latest_networks) > 0:
-      print("restoring last networks")
-      for network, _ in self.latest_networks[::-1]:
-        network.restore(text_encoder, unet)
-      self.latest_networks.clear()
-
-  def process_batch(self, p, *args, **kwargs):
+  def process(self, p, *args):
     unet = p.sd_model.model.diffusion_model
     text_encoder = p.sd_model.cond_stage_model
 
+    def restore_networks():
+      if len(self.latest_networks) > 0:
+        print("restoring last networks")
+        for network, _ in self.latest_networks[::-1]:
+          network.restore(text_encoder, unet)
+        self.latest_networks.clear()
+
     if not args[0]:
-      self.restore_networks(p.sd_model)
+      restore_networks()
       return
 
     params = []
@@ -177,7 +164,7 @@ class Script(scripts.Script):
           break
 
     if models_changed:
-      self.restore_networks(p.sd_model)
+      restore_networks()
       self.latest_params = params
       self.latest_model_hash = p.sd_model.sd_model_hash
 
@@ -218,14 +205,6 @@ class Script(scripts.Script):
     self.set_infotext_fields(p, self.latest_params)
 
 
-def on_script_unloaded():
-    if shared.sd_model:
-        for s in scripts.scripts_txt2img.alwayson_scripts:
-            if isinstance(s, Script):
-                s.restore_networks(shared.sd_model)
-                break
-
-
 def on_ui_tabs():
   global addnet_paste_params
   with gr.Blocks(analytics_enabled=False) as additional_networks_interface:
@@ -250,8 +229,6 @@ def on_ui_settings():
       True, "Make a backup copy of the model being edited when saving its metadata.", section=section))
   shared.opts.add_option("additional_networks_show_only_safetensors", shared.OptionInfo(False, "Only show .safetensors format models", section=section))
   shared.opts.add_option("additional_networks_show_only_models_with_metadata", shared.OptionInfo("disabled", "Only show models that have/don't have user-added metadata", gr.Radio, {"choices": ["disabled", "has metadata", "missing metadata"]}, section=section))
-  shared.opts.add_option("additional_networks_max_top_tags", shared.OptionInfo(20, "Max number of top tags to show", section=section))
-  shared.opts.add_option("additional_networks_max_dataset_folders", shared.OptionInfo(20, "Max number of dataset folders to show", section=section))
 
 
 def on_infotext_pasted(infotext, params):
@@ -291,7 +268,6 @@ def on_infotext_pasted(infotext, params):
 xyz_grid_support.initialize(Script)
 
 
-script_callbacks.on_script_unloaded(on_script_unloaded)
 script_callbacks.on_ui_tabs(on_ui_tabs)
 script_callbacks.on_ui_settings(on_ui_settings)
 script_callbacks.on_infotext_pasted(on_infotext_pasted)

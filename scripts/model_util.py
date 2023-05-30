@@ -172,10 +172,7 @@ def hash_model_file(finfo):
     cached = cache("hashes").get(filename, None)
     if cached is None or stat.st_mtime != cached["mtime"]:
       if metadata is None and model_util.is_safetensors(filename):
-        try:
-          metadata = safetensors_hack.read_metadata(filename)
-        except Exception as ex:
-          return {"error": ex, "filename": filename}
+        metadata = safetensors_hack.read_metadata(filename)
       model_hash = get_model_hash(metadata, filename)
       legacy_hash = get_legacy_hash(metadata, filename)
     else:
@@ -209,10 +206,7 @@ def get_all_models(paths, sort_by, filter_by):
   with tqdm.tqdm(total=len(fileinfos)) as pbar:
       for res in p.imap_unordered(hash_model_file, fileinfos):
           pbar.update()
-          if "error" in res:
-              print(f"Failed to read model file {res['filename']}: {res['error']}")
-          else:
-              data.append(res)
+          data.append(res)
   p.close()
 
   cache_hashes = cache("hashes")
@@ -245,10 +239,6 @@ def get_all_models(paths, sort_by, filter_by):
     legacy_hash = result["legacy"]
 
     name = os.path.splitext(os.path.basename(filename))[0]
-
-    # Commas in the model name will mess up infotext restoration since the
-    # infotext is delimited by commas
-    name = name.replace(",", "_")
 
     # Prevent a hypothetical "None.pt" from being listed.
     if name != "None":
